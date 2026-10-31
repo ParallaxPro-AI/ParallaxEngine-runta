@@ -32,7 +32,7 @@ SYSTEM_PROMPT = (
     'after you finish, so focus on implementing the requested game.'
 )
 STOP = threading.Event()
-# Baseline and maximum memory recorded on the base checkpoint, so every game runtime gets it.
+# Baseline and maximum memory for the base setup runtime, recorded on its checkpoint so every game runtime gets it.
 MEMORY_MIB = 4096
 EDITOR_PORT = 5180
 
@@ -60,6 +60,10 @@ def upload_tools(runtime):
         runtime.files.write('/opt/pxr/' + name, asset(name))
 
 
+def say(meta, message):
+    print(f'{meta["id"]}: {message}', flush=True)
+
+
 def stopped():
     if STOP.is_set():
         raise Interrupted('interrupted by Ctrl-C; runtime retained')
@@ -76,6 +80,28 @@ def provider_by_id(cloud, provider_id):
             return provider
     known = ', '.join(f'{item.get("display_name", item["id"])} ({item["id"]})' for item in providers)
     raise ValueError(f'Runta managed provider {provider_id!r} not found. Available: {known or "none"}')
+
+
+def watch_setup(runtime, engine_ref):
+    """Runs setup.sh, printing its latest log line every 20 seconds."""
+    started = time.monotonic()
+    future = runtime.exec_detached(
+        ['bash', '-c', 'set -o pipefail; bash /opt/pxr/setup.sh 2>&1 | tee /opt/pxr/setup.log'],
+        env={'ENGINE_REF': engine_ref},
+        timeout=3600,
+        max_output_bytes=200_000,
+    )
+    last = None
+    while not wait([future], timeout=20).done:
+        try:
+            line = shell(runtime, 'tail -n 1 /opt/pxr/setup.log 2>/dev/null', timeout=30).strip()
+        except (RuntimeError, RuntaError):
+            continue  # Only progress output; the setup command itself is still being watched.
+        if line and line != last:
+            minutes, seconds = divmod(int(time.monotonic() - started), 60)
+            print(f'  [{minutes}m{seconds:02d}s] {line[:150]}', flush=True)
+            last = line
+    return future.result()
 
 
 def setup(args):
@@ -98,17 +124,17 @@ def setup(args):
         print(f'Preparing Cloud Agent base {agent["id"]}', flush=True)
         try:
             runtime = cloud.sdk.runtimes.get(agent['runtime_id'])
+            print('Waiting for the runtime to start', flush=True)
             runtime.wait_until_ready(timeout=300)
+            print(f'Restarting it with {MEMORY_MIB} MiB of memory', flush=True)
+            cloud.set_memory(runtime, MEMORY_MIB)
+            runtime.resume(timeout=300)
             shell(runtime, 'mkdir -p /opt/pxr /workspace')
             script = asset('setup.sh')
             runtime.files.write('/opt/pxr/setup.sh', script)
             upload_tools(runtime)
-            setup_result = runtime.exec(
-                ['bash', '/opt/pxr/setup.sh'],
-                env={'ENGINE_REF': args.engine_ref},
-                timeout=3600,
-                max_output_bytes=200_000,
-            )
+            print('Installing ParallaxEngine (several minutes)', flush=True)
+            setup_result = watch_setup(runtime, args.engine_ref)
             state.with_suffix('.log').write_text(setup_result.stdout_text + setup_result.stderr_text)
             if setup_result.exit_code:
                 raise RuntimeError(
@@ -116,6 +142,7 @@ def setup(args):
                 )
             info['versions'] = json.loads(runtime.files.read('/opt/pxr/versions.json'))
             info['setup_sha256'] = sha256(script)
+            print('Saving the checkpoint (can take a while)', flush=True)
             checkpoint = cloud.checkpoint(runtime, 'parallax-base-' + stamp(), MEMORY_MIB)
             info['memory_mib'] = MEMORY_MIB
             info['checkpoint'] = checkpoint.id
@@ -247,10 +274,15 @@ def take_screenshot(runtime, dest, meta):
 
 def prepare_game(cloud, runtime, dest, meta):
     """Checks and tests the game, then serves it in the editor and screenshots it."""
+    say(meta, 'running parallax check and test')
     run_checks(runtime, dest, meta)
+    result = meta['result']
+    outcome = {label: 'ok' if result.get(label + '_exit') == 0 else 'failed' for label in ('check', 'test')}
+    say(meta, f'check {outcome["check"]}, test {outcome["test"]}; starting the editor')
     try:
         start_editor(cloud, runtime, meta)
         stopped()
+        say(meta, 'taking a screenshot')
         take_screenshot(runtime, dest, meta)
     except Interrupted:
         raise
@@ -318,7 +350,10 @@ def run_one(folder, prompt_id, prompt, name, profile, sample, checkpoint, provid
             agent = cloud.create_agent(provider['id'], f'pxr {ident}', instruction, checkpoint, SYSTEM_PROMPT)
             meta['agent_id'], meta['runtime_id'], meta['status'] = agent['id'], agent['runtime_id'], 'running'
             save(path, meta)
+            say(meta, f'agent {agent["id"]} started')
             run = cloud.wait_for_run(agent['id'], args.timeout, STOP)
+            minutes = int(time.time() - meta['started']) // 60
+            say(meta, f'agent {run["status"]} after {minutes}m')
             meta['agent_run_id'] = run['id']
             meta['agent_result'] = run.get('result')
             meta['error'] = agent_error(cloud, agent, run, args.timeout, dest)
@@ -328,6 +363,7 @@ def run_one(folder, prompt_id, prompt, name, profile, sample, checkpoint, provid
             retry(lambda: upload_tools(runtime))
             meta['versions'] = json.loads(retry(lambda: runtime.files.read('/opt/pxr/versions.json')))
             prepare_game(cloud, runtime, dest, meta)
+            say(meta, 'saving the game source')
             try:
                 copy_game(runtime, path, meta)
             except (RuntaError, OSError, RuntimeError, ValueError, tarfile.TarError) as error:
