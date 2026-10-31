@@ -165,17 +165,22 @@ class Cloud:
     def delete_agent(self, agent_id):
         self.request('DELETE', api('agents', agent_id), params={'delete_runtime': 'true'})
 
-    def checkpoint(self, runtime, name, memory_mib):
+    def set_memory(self, runtime, memory_mib):
+        """Shuts the runtime down and sets its baseline and maximum memory; resume it to use it."""
         runtime.shutdown()
         deadline = time.monotonic() + 300
         while runtime.status().value != 'shutdown':
             if time.monotonic() > deadline:
                 raise TimeoutError('base Cloud Agent runtime did not shut down')
             time.sleep(2)
-        # Agents restored from a cold checkpoint get the memory recorded on it. Runta's default
-        # 512 MiB baseline let the kernel OOM-kill pi and esbuild when several runs started at once.
+        # A running VM only has its baseline memory, and Runta's default 512 MiB baseline let the
+        # kernel OOM-kill pnpm install, esbuild, pi and Runta's own guest agent.
         memory = {'memory_mib': memory_mib}
         self.patch_runtime(runtime.id, {'resources': {'requests': memory, 'limits': memory}})
+
+    def checkpoint(self, runtime, name, memory_mib):
+        # Agents restored from a cold checkpoint get the memory recorded on it.
+        self.set_memory(runtime, memory_mib)
         path = api('runtimes', runtime.id, 'checkpoints')
         response = self.http.post(path, json={'name': name, 'kind': 'cold'})
         response.raise_for_status()
