@@ -351,37 +351,56 @@ def run_one(folder, prompt_id, prompt, name, profile, sample, checkpoint, provid
             meta['agent_id'], meta['runtime_id'], meta['status'] = agent['id'], agent['runtime_id'], 'running'
             save(path, meta)
             say(meta, f'agent {agent["id"]} started')
-            run = cloud.wait_for_run(agent['id'], args.timeout, STOP)
-            minutes = int(time.time() - meta['started']) // 60
-            say(meta, f'agent {run["status"]} after {minutes}m')
-            meta['agent_run_id'] = run['id']
-            meta['agent_result'] = run.get('result')
-            meta['error'] = agent_error(cloud, agent, run, args.timeout, dest)
-            save(path, meta)
-            runtime = retry(lambda: cloud.sdk.runtimes.get(agent['runtime_id']))
-            retry(lambda: runtime.wait_until_ready(timeout=300))
-            retry(lambda: upload_tools(runtime))
-            meta['versions'] = json.loads(retry(lambda: runtime.files.read('/opt/pxr/versions.json')))
-            prepare_game(cloud, runtime, dest, meta)
-            say(meta, 'saving the game source')
-            try:
-                copy_game(runtime, path, meta)
-            except (RuntaError, OSError, RuntimeError, ValueError, tarfile.TarError) as error:
-                meta['backup_error'] = str(error)
-            meta['status'] = final_status(run, meta)
-        except Interrupted as error:
-            # Keep the agent's own error if it already reported one.
-            meta['status'], meta['error'] = 'interrupted', meta.get('error') or str(error)
-            if meta['agent_id']:
-                try:
-                    cloud.cancel_active(meta['agent_id'])
-                except httpx.HTTPError as cancel_error:
-                    meta['cancel_error'] = str(cancel_error)
         except Exception as error:
-            meta['status'], meta['error'] = 'failed', str(error)
-        finally:
-            meta['finished'] = time.time()
+            meta['status'] = 'interrupted' if isinstance(error, Interrupted) else 'failed'
+            meta['error'], meta['finished'] = str(error), time.time()
             save(path, meta)
+            return meta
+        return finish_run(cloud, path, meta, args.timeout)
+
+
+def finish_run(cloud, path, meta, timeout):
+    """Waits for the run's agent, then checks, tests, screenshots and saves its game."""
+    dest = path.parent
+    agent = {'id': meta['agent_id'], 'runtime_id': meta['runtime_id']}
+    try:
+        run = cloud.wait_for_run(agent['id'], timeout, STOP)
+        minutes = int(time.time() - meta['started']) // 60
+        say(meta, f'agent {run["status"]} after {minutes}m')
+        meta['agent_run_id'] = run['id']
+        meta['agent_result'] = run.get('result')
+        meta['error'] = agent_error(cloud, agent, run, timeout, dest)
+        save(path, meta)
+        runtime = retry(lambda: cloud.sdk.runtimes.get(agent['runtime_id']))
+        retry(lambda: runtime.wait_until_ready(timeout=300))
+        retry(lambda: upload_tools(runtime))
+        meta['versions'] = json.loads(retry(lambda: runtime.files.read('/opt/pxr/versions.json')))
+        prepare_game(cloud, runtime, dest, meta)
+        say(meta, 'saving the game source')
+        try:
+            copy_game(runtime, path, meta)
+        except (RuntaError, OSError, RuntimeError, ValueError, tarfile.TarError) as error:
+            meta['backup_error'] = str(error)
+        meta['status'] = final_status(run, meta)
+    except Interrupted as error:
+        # Keep the agent's own error if it already reported one.
+        meta['status'], meta['error'] = 'interrupted', meta.get('error') or str(error)
+        if meta['agent_id']:
+            try:
+                cloud.cancel_active(meta['agent_id'])
+            except httpx.HTTPError as cancel_error:
+                meta['cancel_error'] = str(cancel_error)
+    except Exception as error:
+        meta['status'], meta['error'] = 'failed', str(error)
+        if 'agent_run_id' not in meta:
+            # pxr stopped waiting, not the agent: it may still be building on Runta.
+            meta['error'] += (
+                f'\nThe agent may still be running on Runta; '
+                f'`pxr attach {meta["id"]}` waits for it again and saves its game.'
+            )
+    finally:
+        meta['finished'] = time.time()
+        save(path, meta)
     return meta
 
 
@@ -456,6 +475,29 @@ def generate(args, profiles, prompts):
         raise
     pool.shutdown()
     return results
+
+
+def attach(args):
+    """Waits again for agents pxr lost track of, then checks, tests and saves their games."""
+    lost = [
+        (path, meta)
+        for path, meta in records(args.out, args.run)
+        if meta.get('agent_id') and 'agent_run_id' not in meta and not meta.get('deleted')
+    ]
+    if not lost:
+        print('No runs are waiting on an agent; every recorded agent has already finished.')
+        return 0
+    failed = 0
+    with Cloud() as cloud:
+        for path, meta in lost:
+            say(meta, f'reattaching to agent {meta["agent_id"]}')
+            # Keep the original time limit, but always look once so an overdue run gets cancelled.
+            remaining = max(args.timeout - (time.time() - meta['started']), 60)
+            meta = finish_run(cloud, path, meta, remaining)
+            outcome = meta.get('url') or meta.get('error', 'see run metadata')
+            print(f'{meta["id"]}: {meta["status"]} → {outcome}', flush=True)
+            failed += meta['status'] != 'passed'
+    return failed
 
 
 def pull(args):

@@ -52,6 +52,23 @@ and downloads what it built so far and marks the run `timed_out`.
 Ctrl-C stops a batch: queued runs never start, started agents are stopped, and
 their runtimes are kept.
 
+If Runta's API fails while `pxr` is waiting on an agent, the run is marked
+`failed`, but the agent may still be building. Reattach to it instead of
+rerunning:
+
+```sh
+uv run pxr attach RUN_ID
+```
+
+`RUN_ID` is the name at the start of each line `pxr run` prints, such as
+`farming-default-1-fa03c9` in `farming-default-1-fa03c9: failed → ...`. It is
+also the run's folder name under `results/batches/`, and the folder's path
+works too.
+
+`attach` waits for the agent again, then checks, tests, screenshots and saves
+its game like `pxr run` would. Omit `RUN_ID` to reattach every run `pxr` lost
+track of. The two-hour limit still counts from when the run started.
+
 The checkpoint is a snapshot of the engine and of `pxr/runtime/setup.sh`. Rerun
 `pxr base` to pick up a newer engine or a changed `setup.sh`; `pxr run` prints
 the base's engine commit and warns when `setup.sh` has changed since.

@@ -42,6 +42,15 @@ def main(argv=None):
     run.add_argument('--dry-run', action='store_true')
     view = commands.add_parser('gallery', help='rebuild and open the local gallery')
     view.add_argument('--no-open', action='store_true')
+    attach = commands.add_parser(
+        'attach', help='wait again for agents pxr lost track of, then check and save their games'
+    )
+    attach.add_argument(
+        '--timeout',
+        type=positive,
+        default=7200,
+        help='agent time limit in seconds, counted from when the run started',
+    )
     pull = commands.add_parser('pull', help='download game source from a Runta runtime')
     down = commands.add_parser('down', help='delete Runta runtimes for saved generations')
     down.add_argument('--yes', action='store_true', help='allow deletion even without a current local backup')
@@ -50,9 +59,9 @@ def main(argv=None):
         action='store_true',
         help='delete base checkpoints that are no longer current or in use, instead of runtimes',
     )
-    for command in (pull, down):
+    for command in (attach, pull, down):
         command.add_argument('run', nargs='?', help='run folder or id; omitted means all saved runs')
-    for command in (base, run, view, pull, down):
+    for command in (base, run, view, attach, pull, down):
         command.add_argument('--out', type=Path, default=Path('results'))
     args = parser.parse_args(argv)
     try:
@@ -72,6 +81,10 @@ def main(argv=None):
             return int(any(run['status'] != 'passed' for run in results))
         elif args.command == 'gallery':
             print(gallery.render(args.out, not args.no_open))
+        elif args.command == 'attach':
+            failed = runner.attach(args)
+            gallery.render(args.out)
+            return int(failed > 0)
         elif args.command == 'pull':
             failed = runner.pull(args)
             gallery.render(args.out)
