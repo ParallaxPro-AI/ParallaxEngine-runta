@@ -60,6 +60,16 @@ def upload_tools(runtime):
         runtime.files.write('/opt/pxr/' + name, asset(name))
 
 
+def result_line(meta):
+    """How a finished run is reported: its status, why it didn't pass, and its play URL."""
+    status, url, error = meta['status'], meta.get('url'), meta.get('error')
+    if not url:
+        return f'{meta["id"]}: {status} → {error or "see run metadata"}'
+    if error and status != 'passed':
+        status += f' ({error.splitlines()[0]})'
+    return f'{meta["id"]}: {status} → {url}'
+
+
 def say(meta, message):
     print(f'{meta["id"]}: {message}', flush=True)
 
@@ -464,8 +474,7 @@ def generate(args, profiles, prompts):
         for future in as_completed(futures):
             meta = future.result()
             results.append(meta)
-            outcome = meta.get('url') or meta.get('error', 'see run metadata')
-            print(f'{meta["id"]}: {meta["status"]} → {outcome}', flush=True)
+            print(result_line(meta), flush=True)
     except KeyboardInterrupt:
         STOP.set()
         pool.shutdown(wait=False, cancel_futures=True)
@@ -494,8 +503,7 @@ def attach(args):
             # Keep the original time limit, but always look once so an overdue run gets cancelled.
             remaining = max(args.timeout - (time.time() - meta['started']), 60)
             meta = finish_run(cloud, path, meta, remaining)
-            outcome = meta.get('url') or meta.get('error', 'see run metadata')
-            print(f'{meta["id"]}: {meta["status"]} → {outcome}', flush=True)
+            print(result_line(meta), flush=True)
             failed += meta['status'] != 'passed'
     return failed
 
