@@ -1,0 +1,36 @@
+# Save your provider here so `pxr run` doesn't need --provider every time.
+# Get the ID from `uv run pxr providers`.
+# [profiles.default]
+# provider = "YOUR_PROVIDER_ID"
+
+[[prompts]]
+id = "snake"
+text = "Make a 2D snake game on a neon grid: the snake grows when it eats glowing orbs, walls and its own tail end the run, golden orbs appear briefly for bonus points, and the speed rises every 10 orbs. Show score and best score."
+
+[[prompts]]
+id = "solitaire"
+text = "Make a 2D klondike solitaire card game: deal seven tableau piles, drag cards between piles following alternating colours and descending rank, build the four foundations from ace to king, with undo, a move counter and a win celebration."
+
+[[prompts]]
+id = "asteroids"
+text = "Make a 2D space shooter where a ship rotates and thrusts with inertia, shoots asteroids that split into smaller pieces, and saucers appear on later waves. Wrap around the screen edges, three lives, and a high score."
+
+[[prompts]]
+id = "fishing"
+text = "Make a 2D side-view fishing game: cast a line from a boat, reel against a tension meter so the line doesn't snap, catch different fish at different depths, sell them at the dock to buy better rods and lures."
+
+[[prompts]]
+id = "mini-golf"
+text = "Make a 3D mini golf game with 6 holes: aim with the mouse, hold to set power, the ball rolls with real physics over ramps, windmills and moving obstacles. Count strokes per hole against par and show a scorecard at the end."
+
+[[prompts]]
+id = "bowling"
+text = "Make a 3D bowling game: aim and add spin, roll the ball down a lane into ten physics pins, score strikes and spares correctly over 10 frames, with a scoreboard and a friendly AI opponent."
+
+[[prompts]]
+id = "snowboarding"
+text = "Make a 3D downhill snowboarding game: carve down a long mountain slope with trees and rocks, hit jumps to do spin tricks for points, pass through gates for time bonuses, and crash if you land badly. Finish line with a time and trick score."
+
+[[prompts]]
+id = "farming"
+text = "Make a 3D cozy farming game on a small farm: till soil, plant seeds, water crops each day, harvest and sell them at a market stall, and buy new seed types. A day-night cycle with a few in-game days to reach a money goal."

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>ParallaxEngine generations</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui; margin: 32px; background: #f5f5f3; color: #222; }
+  main { max-width: 1400px; margin: auto; }
+  h1 { margin-bottom: 4px; }
+  input { padding: 10px; width: min(100%, 600px); margin: 20px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+  article { background: white; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+  img, .empty { width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: #eee; }
+  .empty { display: grid; place-items: center; }
+  .info { padding: 16px; }
+  h2 { font-size: 17px; margin: 0 0 8px; }
+  p { margin: 8px 0; }
+  small { color: #555; }
+  a { color: #2455a4; }
+  details { margin-top: 12px; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+  .failed { color: #a22; }
+</style>
+<main>
+  <h1>ParallaxEngine generations</h1>
+  <p>$count runs. Exit code 0 means that step passed; screenshots are previews, not quality scores.</p>
+  <input type="search" placeholder="Filter by prompt, provider, model, engine or status" aria-label="Filter runs">
+  <div class="grid">
+$cards
+  </div>
+</main>
+<script>
+  document.querySelector('input').addEventListener('input', event => {
+    const words = event.target.value.toLowerCase().split(/\s+/).filter(Boolean);
+    document.querySelectorAll('article').forEach(card => {
+      card.hidden = !words.every(word => card.dataset.search.includes(word));
+    });
+  });
+</script>
+</html>
